@@ -2,6 +2,8 @@
 
 import sys
 
+SP = 7
+
 
 class CPU:
     """Main CPU class."""
@@ -9,15 +11,34 @@ class CPU:
     def __init__(self):
         """Construct a new CPU."""
         self.ram = [0] * 256
-        self.reg = [0] * 8
-        self.current_address = 0
+
+        self.reg = [0,  # R0
+                    0,  # R1
+                    0,  # R2
+                    0,  # R3
+                    0,  # R4
+                    0,  # R5 - Interrupt Mask
+                    0,  # R6 - Interrupt Status
+                    0xf4]  # R7 - Stack Pointer
+
+        self.flags = 0b00000000
+
+        self.pc = 0
         self.running = False
 
         self.instruction_set = {
             0b10000010: self.ins_ldi,
             0b01000111: self.ins_prn,
             0b10100010: self.ins_mul,
-            0b00000001: self.ins_hlt
+            0b00000001: self.ins_hlt,
+            0b01000101: self.ins_push,
+            0b01000110: self.ins_pop,
+            0b10100111: self.ins_cmp,
+            0b01010110: self.ins_jne,
+            0b01010101: self.ins_jeq,
+            0b01010100: self.ins_jmp
+
+
         }
 
     def load(self):
@@ -46,6 +67,13 @@ class CPU:
             self.reg[reg_a] += self.reg[reg_b]
         elif op == "SUB":
             self.reg[reg_a] -= self.reg[reg_b]
+        elif op == "CMP":
+            if self.reg[reg_a] == self.reg[reg_b]:
+                self.flags = 0b00000001
+            elif self.reg[reg_a] > self.reg[reg_b]:
+                self.flags = 0b10000010
+            else:
+                self.flags = 0b00000100
         else:
             raise Exception("Unsupported ALU operation")
 
@@ -84,27 +112,53 @@ class CPU:
             self.ram[address] = value
 
     def ins_ldi(self):
-        reg_address = self.ram_read(self.current_address + 1)
-        value = self.ram_read(self.current_address + 2)
-        self.reg[reg_address] = value
-        self.current_address += 3
+        self.reg[self.ram_read(self.pc + 1)] = self.ram_read(self.pc + 2)
+        self.pc += 3
 
     def ins_prn(self):
-        print(self.reg[0])
-        self.current_address += 2
+        print(self.reg[self.ram_read(self.pc + 1)])
+        self.pc += 2
 
     def ins_mul(self):
         self.reg[0] *= self.reg[1]
-        self.current_address += 3
+        self.pc += 3
 
     def ins_hlt(self):
-        print("Halting CPU")
         self.running = False
+
+    def ins_push(self):
+        self.reg[SP] -= 1
+        self.ram_write(self.reg[SP], self.reg[self.ram_read(self.pc + 1)])
+        self.pc += 2
+
+    def ins_pop(self):
+        self.reg[self.ram_read(self.pc + 1)] = self.ram_read(self.reg[SP])
+        self.reg[SP] += 1
+        self.pc += 2
+
+    def ins_cmp(self):
+        self.alu('CMP', self.ram_read(self.pc + 1), self.ram_read(self.pc + 2))
+        self.pc += 3
+
+    def ins_jne(self):
+        if (self.flags & 0b00000001) == 0:
+            self.ins_jmp()
+        else:
+            self.pc += 2
+
+    def ins_jeq(self):
+        if (self.flags & 0b00000001) == 1:
+            self.ins_jmp()
+        else:
+            self.pc += 2
+
+    def ins_jmp(self):
+        self.pc = self.reg[self.ram_read(self.pc + 1)]
 
     def run(self):
         self.running = True
         while self.running:
-            instruction = self.ram[self.current_address]
+            instruction = self.ram[self.pc]
 
             if instruction in self.instruction_set:
                 self.instruction_set[instruction]()
